@@ -105,7 +105,7 @@
   
   
   
-  <meta property="article:modified_time" content="2026-11-12T14:23:34">
+  <meta property="article:modified_time" content="2026-11-26T13:44:24">
   
   <script type="application/ld+json">
   {
@@ -120,7 +120,7 @@
     "inLanguage": "en",
     "keywords": "RF-DETR, rfdetr, object detection, instance segmentation, computer vision, Roboflow",
     "datePublished": "2025-03-01",
-    "dateModified": "2026-11-12T14:23:34",
+    "dateModified": "2026-11-26T13:44:24",
     "image": "https://storage.googleapis.com/com-roboflow-marketing/rf-detr/rf_detr_1-4_latency_accuracy_object_detection.png",
     "author": {"@type": "Organization", "name": "Roboflow", "url": "https://roboflow.com"},
     "publisher": {"@type": "Organization", "name": "Roboflow", "url": "https://roboflow.com"},
@@ -1637,6 +1637,17 @@ APIs described here may change or may never ship in a release, so use the <a hre
     <span class="md-ellipsis">
       
         Validation performance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#long-tailed-datasets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Long-tailed datasets
       
     </span>
   </a>
@@ -3825,6 +3836,17 @@ APIs described here may change or may never ship in a release, so use the <a hre
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#long-tailed-datasets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Long-tailed datasets
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4462,6 +4484,18 @@ APIs described here may change or may never ship in a release, so use the <a hre
 <td>Log per-class AP metrics to the console and loggers. Enable it to also run the underlying per-class <code>torchmetrics</code> computation. Aggregate mAP/mAR and F1 metrics remain available either way.</td>
 </tr>
 <tr>
+<td><code>min_class_support</code></td>
+<td><code>int</code></td>
+<td><code>0</code></td>
+<td>Minimum ground-truth instances a class needs in the evaluated split to count toward <code>&lt;split&gt;/mAP_50_95_gated</code> and the macro-F1 threshold sweep. Above <code>0</code>, best-checkpoint selection and early stopping monitor the gated mAP. <code>0</code> disables gating. See <a href="#long-tailed-datasets">Long-tailed datasets</a>.</td>
+</tr>
+<tr>
+<td><code>class_agnostic_eval</code></td>
+<td><code>bool</code></td>
+<td><code>False</code></td>
+<td>Also evaluate boxes with every label collapsed to one class, logged as <code>&lt;split&gt;/mAP_50_95_agnostic</code> and <code>&lt;split&gt;/mAP_50_agnostic</code>. Adds a second box-metric accumulation to every validation and test epoch: one more host copy of the box state (boxes, scores, ground truth) and one more <code>all_gather</code> per list state under DDP, never streamed, even with <code>eval_backend="hotcoco_streaming"</code>.</td>
+</tr>
+<tr>
 <td><code>eval_backend</code></td>
 <td><code>Literal["hotcoco","hotcoco_streaming","faster_coco_eval","ufcoco","vernier"]</code></td>
 <td><code>"vernier"</code></td>
@@ -4507,6 +4541,13 @@ APIs described here may change or may never ship in a release, so use the <a hre
 <li><code>eval_backend="ufcoco"</code> selects <a href="https://github.com/developer0hye/ultrafast-pycocotools">ultrafast-pycocotools</a>, a Rust evaluator that reproduces pycocotools' precision, recall and score arrays byte for byte. It ships with <code>rfdetr[train]</code> like the other backends; pass <code>eval_backend="ufcoco"</code> to <code>model.train(...)</code> or <code>model.evaluate(...)</code>. The selection reaches the validation, train-split and EMA metrics alike, and the parity tests hold it to the same exact equality against <code>faster_coco_eval</code> as <code>hotcoco</code>, for box-only and box-plus-mask evaluation at <code>eval_max_dets</code> 100 and 500.</li>
 <li><code>eval_backend="hotcoco_streaming"</code> runs hotcoco's <code>StreamingEval</code>: each validation batch is matched in the validation step, and the end of the epoch only accumulates and summarizes. Metrics are bit-identical to <code>"hotcoco"</code>. On synthetic data on an Apple M-series CPU, the end-of-epoch step took 0.025 s instead of 0.238 s for 2,000 images with 300 box detections each, but the whole evaluation took 1.05 s instead of 0.29 s because building the per-batch records costs more than the batch path's array load. For a bbox+segm run (200 images, 100 detections each) the end-of-epoch step took 0.005 s instead of 0.178 s and the whole evaluation 0.66 s instead of 0.71 s. Memory: it keeps the stored evaluation state for the fallback and adds the stream's matching state during the epoch, but skips the full COCO dataset build at the end; peak memory has not been measured. Streaming needs the model's <code>num_classes</code> and a single process; under DDP, with a label outside <code>[0, num_classes]</code>, or after the metric is pickled mid-epoch, it evaluates in one batch exactly as <code>"hotcoco"</code> does and logs why.</li>
 <li>Adding a new <code>eval_backend</code> or benchmarking an existing one: see <a href="../advanced/#coco-evaluation-backends">Advanced Training → COCO Evaluation Backends</a>.</li>
+</ul>
+<h3 id="long-tailed-datasets">Long-tailed datasets<a class="headerlink" href="#long-tailed-datasets" title="Permanent link">&para;</a></h3>
+<p>Macro-averaged metrics give every class the same weight, so on a long-tailed dataset a class with two or three validation instances moves <code>val/mAP_50_95</code> as much as a class with thousands, and its AP jumps between 0 and 1 from one epoch to the next. Two opt-in settings make the reported numbers, and the checkpoint they select, less sensitive to that:</p>
+<ul>
+<li><code>min_class_support=N</code> logs <code>&lt;split&gt;/mAP_50_95_gated</code> beside <code>&lt;split&gt;/mAP_50_95</code>: the mean of per-class AP over the classes with at least <code>N</code> non-crowd ground-truth instances in the evaluated split. Segmentation models also log <code>&lt;split&gt;/segm_mAP_50_95_gated</code>, and the EMA track logs the <code>ema_</code> variants. The confidence-threshold sweep maximises macro-F1 over the same classes. Classes below the floor are still evaluated. With <code>log_per_class_metrics=True</code> they keep their rows in the per-class table, which gains a <code>Support</code> column, and their <code>&lt;split&gt;/AP/&lt;class&gt;</code> keys; with the default <code>False</code> there are no per-class rows, Support column or AP keys at all. If no class reaches the floor, the gated mAP falls back to the all-class mAP, <code>val/F1</code>, <code>val/precision</code> and <code>val/recall</code> fall back to every class with ground truth, and one warning per split is logged on the main process.</li>
+<li>With <code>min_class_support</code> above <code>0</code> and <code>best_model_metric="map"</code>, <code>checkpoint_best_*.pth</code> selection and early stopping monitor the gated key (<code>val/mAP_50_95_gated</code>, or <code>val/segm_mAP_50_95_gated</code> for segmentation). <code>best_model_metric="mar"</code> and keypoint models keep their ungated monitors, because only box and mask mAP have a gated variant. <code>&lt;split&gt;/mAP_50_95</code> itself is never changed. The floor makes the metric compute per-class AP even when <code>log_per_class_metrics=False</code>.</li>
+<li><code>class_agnostic_eval=True</code> scores the same boxes a second time with every predicted and ground-truth label collapsed to a single class, logged as <code>&lt;split&gt;/mAP_50_95_agnostic</code> and <code>&lt;split&gt;/mAP_50_agnostic</code> for validation and test. A query the model scores under several labels counts once, at its highest score. The rows come from the class-aware top-<code>num_select</code> selection of query x class pairs and are de-duplicated per box afterwards, so a query displaced from that selection by another query's extra labels is not recovered, and agnostic recall can read lower than a selection made directly over queries. A high agnostic mAP next to a low class-aware mAP often means objects are found but named wrongly, but not always: class-aware mAP averages the per-class APs with equal weight, while the agnostic score pools the objects of every class, so finding every common-class object and missing a rare class produces the same gap with every label correct. Check the per-class table before attributing the gap to misclassification. It is box-only, also for segmentation models, and follows the model validation forwards through (the EMA model by default).</li>
 </ul>
 <h2 id="keypoint-preview-parameters">Keypoint Preview Parameters<a class="headerlink" href="#keypoint-preview-parameters" title="Permanent link">&para;</a></h2>
 <p>These parameters apply when training <code>RFDETRKeypointPreview</code> on COCO keypoint annotations or Ultralytics YOLO pose labels.</p>
@@ -4737,6 +4778,7 @@ APIs described here may change or may never ship in a release, so use the <a hre
 </table>
 <p>With <code>pack_targets=True</code>, train, validation, test, and predict loaders yield batches whose target element is <code>PackedTargets</code> whenever packing is lossless. The Lightning <code>transfer_batch_to_device</code> hook accepts those batches or an unpacked tuple of target dicts. It materializes each packed field directly into its own independently owned per-sample tensor on the target device, producing the same plain per-sample dict list that training, validation, test, and prediction hooks receive on the unpacked path. Batches that cannot be packed losslessly retain their original tuple of dicts.</p>
 <p>With <code>pad_targets_to</code> set, only the training loader pads; validation, test and predict keep the real targets, since padded rows would otherwise be counted as ground truth by COCO matching. Padding runs before packing in the collate seam, so a batch with both options set always packs, at the padded shape. It is semantically transparent: the padded columns get a query-independent matcher cost so they cannot displace a real target, and the box losses and <code>class_error</code> are masked to the real rows. Segmentation models, keypoint models, and the position-supervised, varifocal and plain focal classification branches (<code>ia_bce_loss=False</code>) raise instead of silently including padded rows in the loss — leave <code>pad_targets_to</code> unset for those. <code>pad_targets_to</code> is incompatible with <code>augmentation_backend="kornia"</code>/<code>"gpu"</code> (<code>setup("fit")</code> raises <code>ValueError</code>): the GPU pipeline reconstructs its own real/filler mask from the padded box count and strips it back to a variable row count, undoing the fixed shape. An image whose real ground-truth count exceeds <code>pad_targets_to</code> has its extra boxes dropped from training, logged as a warning.</p>
+<p><code>skip_unreadable_images</code> (<code>bool</code>, default <code>False</code>) is an opt-in for long or multi-GPU runs on storage where a read can fail. By default an image the training loader cannot read (a missing file, an I/O error, or a truncated or unidentifiable file) ends the run: for COCO the error is raised in the DataLoader worker, and for YOLO a missing or bad-header file already fails while the dataset is built. Under DDP a failure on rank 0 can leave the other ranks blocked until the process-group timeout. The option keeps the run alive; it does not prevent a hang. With <code>skip_unreadable_images=True</code> the read is attempted three times, with a 0.5 s and then a 1 s pause, because a short read from network storage looks the same as a truncated file; each failed attempt logs a warning naming the file. If the image is still unreadable, the next readable sample of the dataset, image and annotations together, is returned in its place and one error naming the file is logged, so every DDP process keeps the same number of batches. If the 10 following samples are unreadable too, the process pauses once more for 1 s and tries the requested image once more and then those samples again, because a storage stall longer than the retries fails every candidate alike; a file already known unreadable is not read again. The worst case is 24 reads and 2.5 s of pauses, and only then is a <code>RuntimeError</code> raised, since the dataset or its filesystem is broken. A file Pillow reports as corrupt on open or decode counts as unreadable like a truncated one. Process-resource errors (too many open files, out of memory, <code>EAGAIN</code> when a worker process is spawned) are retried but never replaced by a neighbouring sample, and end the run once the retries fail; a crash of the decoder process is not covered and also ends the run. For YOLO datasets, a header that stays unreadable while the training dataset is built (after the same retries) marks that sample unreadable for the whole run, so it keeps being substituted on that process even if the file is repaired later; an error naming the file is logged when this happens. A substituted sample changes the batch it lands in, so the run no longer matches one with the file intact; search the log for <code>is unreadable</code> to find and repair the files. Validation and test loaders always raise, because a substituted sample would be scored twice. The option applies to COCO and YOLO datasets; a WebDataset shard is read as one stream and is not covered.</p>
 <h2 id="complete-parameter-reference">Complete Parameter Reference<a class="headerlink" href="#complete-parameter-reference" title="Permanent link">&para;</a></h2>
 <p>Below is a summary table of all training parameters:</p>
 <table>
@@ -4936,6 +4978,18 @@ APIs described here may change or may never ship in a release, so use the <a hre
 <td>Log per-class AP metrics; enable to run the underlying per-class compute.</td>
 </tr>
 <tr>
+<td><code>min_class_support</code></td>
+<td>int</td>
+<td>0</td>
+<td>Minimum ground-truth instances for a class to count toward the gated mAP, the F1 sweep and model selection; 0 disables gating.</td>
+</tr>
+<tr>
+<td><code>class_agnostic_eval</code></td>
+<td>bool</td>
+<td>False</td>
+<td>Also log box mAP with every label collapsed to one class (<code>&lt;split&gt;/mAP_50_95_agnostic</code>).</td>
+</tr>
+<tr>
 <td><code>eval_backend</code></td>
 <td><code>Literal["hotcoco","hotcoco_streaming","faster_coco_eval","ufcoco","vernier"]</code></td>
 <td>"vernier"</td>
@@ -5067,6 +5121,12 @@ APIs described here may change or may never ship in a release, so use the <a hre
 <td><code>None</code></td>
 <td>Pad training targets to this many rows, for a shape-stable XLA/TPU graph. See DataLoader Tuning; training loader only.</td>
 </tr>
+<tr>
+<td><code>skip_unreadable_images</code></td>
+<td>bool</td>
+<td>False</td>
+<td>Opt-in: replace an unreadable training image with the next readable sample and log an error. See DataLoader Tuning.</td>
+</tr>
 </tbody>
 </table>
 
@@ -5089,7 +5149,7 @@ APIs described here may change or may never ship in a release, so use the <a hre
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_datetime" title="November 12, 2026 14:23:34 UTC">2026-11-12 14:23:34</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_datetime" title="November 26, 2026 13:44:24 UTC">2026-11-26 13:44:24</span>
   </span>
 
     
